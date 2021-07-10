@@ -51,6 +51,20 @@ pub struct HashPrefix {
     mask: [u32; 5],
 }
 
+/// Defines a desired target suffix for a commit hash.
+///
+/// For example, the hash suffix "deadbeef123" corresponds to the
+/// following structure:
+///   HashSuffix { data: [0, 0, 0, 0x00000dea, 0xdbeef123], mask: [0, 0, 0, 0x00000fff, 0xffffffff] }
+#[derive(Debug, PartialEq, Clone)]
+pub struct HashSuffix {
+    /// The suffix, as split into big-endian four-byte chunks.
+    /// All bits beyond the length of the suffix are set to 0.
+    data: [u32; 5],
+    /// Mask containing bits set to 1 if the bit at that position is specified
+    /// in the suffix, and 0 otherwise.
+    mask: [u32; 5],
+}
 // The fully padded data that gets hashed is the concatenation of all the following:
 // |--- GIT COMMIT HEADER (part of git's raw commit format) ---
 // | * The ASCII string "commit "
@@ -631,6 +645,37 @@ impl HashPrefix {
     #[cfg(feature = "opencl")]
     fn estimated_hashes_needed(&self) -> u64 {
         2u64.saturating_pow(self.mask.iter().map(|word| word.count_ones()).sum())
+    }
+}
+
+impl HashSuffix {
+    /// Creates a new hash suffix from a hex string, which is at most 40 characters.
+    /// Returns 'None' if the supplied suffix was invalid.
+    pub fn new(suffix: &str) -> Option<Self> {
+        if suffix.len() > 40 {
+            return None;
+        }
+
+        let contains_only_valid_characters = prefix.chars().all(|c| {
+            ('0'..='9').contains(&c) || ('a'..='f').contains(&c) || ('A'..='F').contains(&c)
+        });
+
+        if !contains_only_valid_characters {
+            return None;
+        }
+
+        let mut data = [0u32; 5];
+        let mut mask = [0u32; 5];
+
+        for (i, chunk) in prefix.as_bytes().chunks(8).enumerate() {
+            let value =
+                u32::from_str_radix(&String::from_utf8(chunk.to_vec()).unwrap(), 16).unwrap();
+            let num_unspecified_bits = 32 - 4 * chunk.len();
+            data[i] = value >> num_unspecified_bits;
+            mask[i] = u32::MAX << num_unspecified_bits >> num_unspecified_bits;
+        }
+
+        Some(HashSuffix { data, mask })
     }
 }
 
